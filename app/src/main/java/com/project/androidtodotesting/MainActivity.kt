@@ -17,24 +17,28 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.Query
 
 data class TodoItem(
-    val id: Int,
-    val text: String,
+    val id: String = "",
+    val text: String = "",
     val done: Boolean = false
 )
 
@@ -49,18 +53,174 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContent {
             MaterialTheme {
-                TodoScreen()
+                AppRoot()
             }
         }
     }
 }
 
 @Composable
-fun TodoScreen() {
+fun AppRoot() {
+    val auth = remember { FirebaseAuth.getInstance() }
+    var userId by remember { mutableStateOf(auth.currentUser?.uid) }
+
+    DisposableEffect(Unit) {
+        val listener = FirebaseAuth.AuthStateListener { firebaseAuth ->
+            userId = firebaseAuth.currentUser?.uid
+        }
+        auth.addAuthStateListener(listener)
+
+        onDispose {
+            auth.removeAuthStateListener(listener)
+        }
+    }
+
+    if (userId == null) {
+        LoginScreen(auth = auth)
+    } else {
+        TodoScreen(
+            userId = userId ?: "",
+            onLogout = { auth.signOut() }
+        )
+    }
+}
+
+@Composable
+fun LoginScreen(auth: FirebaseAuth) {
+    var email by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+    var message by remember { mutableStateOf("") }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp)
+            .testTag("login_screen"),
+        verticalArrangement = Arrangement.Center
+    ) {
+        Text(
+            text = "Login",
+            style = MaterialTheme.typography.headlineMedium,
+            modifier = Modifier.testTag("login_title")
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        OutlinedTextField(
+            value = email,
+            onValueChange = { email = it },
+            label = { Text("E-Mail") },
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("email_input")
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        OutlinedTextField(
+            value = password,
+            onValueChange = { password = it },
+            label = { Text("Passwort") },
+            visualTransformation = PasswordVisualTransformation(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("password_input")
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Button(
+            onClick = {
+                message = ""
+                auth.signInWithEmailAndPassword(email.trim(), password)
+                    .addOnCompleteListener { task ->
+                        message = if (task.isSuccessful) {
+                            "Login erfolgreich"
+                        } else {
+                            task.exception?.message ?: "Login fehlgeschlagen"
+                        }
+                    }
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("login_button")
+        ) {
+            Text("Einloggen")
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Button(
+            onClick = {
+                message = ""
+                auth.createUserWithEmailAndPassword(email.trim(), password)
+                    .addOnCompleteListener { task ->
+                        message = if (task.isSuccessful) {
+                            "Registrierung erfolgreich"
+                        } else {
+                            task.exception?.message ?: "Registrierung fehlgeschlagen"
+                        }
+                    }
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("register_button")
+        ) {
+            Text("Registrieren")
+        }
+
+        if (message.isNotBlank()) {
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                text = message,
+                modifier = Modifier.testTag("auth_message")
+            )
+        }
+    }
+}
+
+@Composable
+fun TodoScreen(
+    userId: String,
+    onLogout: () -> Unit
+) {
+    val db = remember { FirebaseFirestore.getInstance() }
+    val todos = remember { mutableStateListOf<TodoItem>() }
     var input by remember { mutableStateOf("") }
     var errorMessage by remember { mutableStateOf<String?>(null) }
-    var nextId by remember { mutableIntStateOf(1) }
-    val todos = remember { mutableStateListOf<TodoItem>() }
+
+    val tasksRef = remember(userId) {
+        db.collection("users")
+            .document(userId)
+            .collection("tasks")
+    }
+
+    DisposableEffect(userId) {
+        val registration = tasksRef
+            .orderBy("createdAt", Query.Direction.DESCENDING)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    errorMessage = "Fehler beim Laden der Aufgaben"
+                    return@addSnapshotListener
+                }
+
+                todos.clear()
+
+                snapshot?.documents?.forEach { document ->
+                    todos.add(
+                        TodoItem(
+                            id = document.id,
+                            text = document.getString("text") ?: "",
+                            done = document.getBoolean("done") ?: false
+                        )
+                    )
+                }
+            }
+
+        onDispose {
+            registration.remove()
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -68,15 +228,27 @@ fun TodoScreen() {
             .padding(16.dp)
             .testTag("todo_screen")
     ) {
-        Text(
-            text = "Android ToDo Testing",
-            style = MaterialTheme.typography.headlineSmall,
-            modifier = Modifier.testTag("todo_title")
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                text = "Android ToDo Testing",
+                style = MaterialTheme.typography.headlineSmall,
+                modifier = Modifier.testTag("todo_title")
+            )
 
-        Spacer(modifier = Modifier.height(16.dp))
+            TextButton(
+                onClick = onLogout,
+                modifier = Modifier.testTag("logout_button")
+            ) {
+                Text("Logout")
+            }
+        }
 
-        TextField(
+        Spacer(modifier = Modifier.height(12.dp))
+
+        OutlinedTextField(
             value = input,
             onValueChange = {
                 input = it
@@ -102,17 +274,20 @@ fun TodoScreen() {
         Button(
             onClick = {
                 if (TodoValidator.isValidTask(input)) {
-                    todos.add(
-                        0,
-                        TodoItem(
-                            id = nextId,
-                            text = input.trim(),
-                            done = false
-                        )
+                    val task = hashMapOf(
+                        "text" to input.trim(),
+                        "done" to false,
+                        "createdAt" to System.currentTimeMillis()
                     )
-                    nextId++
-                    input = ""
-                    errorMessage = null
+
+                    tasksRef.add(task)
+                        .addOnSuccessListener {
+                            input = ""
+                            errorMessage = null
+                        }
+                        .addOnFailureListener {
+                            errorMessage = "Aufgabe konnte nicht gespeichert werden"
+                        }
                 } else {
                     errorMessage = "Bitte Aufgabe eingeben"
                 }
@@ -152,10 +327,8 @@ fun TodoScreen() {
                         Checkbox(
                             checked = todo.done,
                             onCheckedChange = { checked ->
-                                val index = todos.indexOfFirst { it.id == todo.id }
-                                if (index != -1) {
-                                    todos[index] = todo.copy(done = checked)
-                                }
+                                tasksRef.document(todo.id)
+                                    .update("done", checked)
                             },
                             modifier = Modifier.testTag("done_checkbox_${todo.id}")
                         )
@@ -175,7 +348,7 @@ fun TodoScreen() {
 
                         TextButton(
                             onClick = {
-                                todos.remove(todo)
+                                tasksRef.document(todo.id).delete()
                             },
                             modifier = Modifier.testTag("delete_button_${todo.id}")
                         ) {
