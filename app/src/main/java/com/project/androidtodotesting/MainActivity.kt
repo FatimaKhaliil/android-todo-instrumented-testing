@@ -48,6 +48,80 @@ object TodoValidator {
     }
 }
 
+enum class AppLanguage {
+    DE, EN
+}
+
+data class AppTexts(
+    val loginTitle: String,
+    val email: String,
+    val password: String,
+    val login: String,
+    val register: String,
+    val logout: String,
+    val todoTitle: String,
+    val taskInput: String,
+    val addTask: String,
+    val emptyList: String,
+    val errorEmptyTask: String,
+    val languageButton: String,
+    val delete: String,
+    val loginSuccess: String,
+    val loginFailed: String,
+    val registerSuccess: String,
+    val registerFailed: String,
+    val loadError: String,
+    val saveError: String
+)
+
+fun getTexts(language: AppLanguage): AppTexts {
+    return when (language) {
+        AppLanguage.DE -> AppTexts(
+            loginTitle = "Anmelden",
+            email = "E-Mail",
+            password = "Passwort",
+            login = "Einloggen",
+            register = "Registrieren",
+            logout = "Abmelden",
+            todoTitle = "Meine ToDo-Liste",
+            taskInput = "Neue Aufgabe",
+            addTask = "Aufgabe hinzufügen",
+            emptyList = "Keine Aufgaben vorhanden",
+            errorEmptyTask = "Bitte Aufgabe eingeben",
+            languageButton = "EN",
+            delete = "Löschen",
+            loginSuccess = "Login erfolgreich",
+            loginFailed = "Login fehlgeschlagen",
+            registerSuccess = "Registrierung erfolgreich",
+            registerFailed = "Registrierung fehlgeschlagen",
+            loadError = "Fehler beim Laden der Aufgaben",
+            saveError = "Aufgabe konnte nicht gespeichert werden"
+        )
+
+        AppLanguage.EN -> AppTexts(
+            loginTitle = "Login",
+            email = "Email",
+            password = "Password",
+            login = "Log in",
+            register = "Register",
+            logout = "Log out",
+            todoTitle = "My ToDo List",
+            taskInput = "New task",
+            addTask = "Add task",
+            emptyList = "No tasks available",
+            errorEmptyTask = "Please enter a task",
+            languageButton = "DE",
+            delete = "Delete",
+            loginSuccess = "Login successful",
+            loginFailed = "Login failed",
+            registerSuccess = "Registration successful",
+            registerFailed = "Registration failed",
+            loadError = "Error loading tasks",
+            saveError = "Task could not be saved"
+        )
+    }
+}
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -64,10 +138,22 @@ fun AppRoot() {
     val auth = remember { FirebaseAuth.getInstance() }
     var userId by remember { mutableStateOf(auth.currentUser?.uid) }
 
+    var language by remember { mutableStateOf(AppLanguage.DE) }
+    val texts = getTexts(language)
+
+    val toggleLanguage = {
+        language = if (language == AppLanguage.DE) {
+            AppLanguage.EN
+        } else {
+            AppLanguage.DE
+        }
+    }
+
     DisposableEffect(Unit) {
         val listener = FirebaseAuth.AuthStateListener { firebaseAuth ->
             userId = firebaseAuth.currentUser?.uid
         }
+
         auth.addAuthStateListener(listener)
 
         onDispose {
@@ -76,17 +162,27 @@ fun AppRoot() {
     }
 
     if (userId == null) {
-        LoginScreen(auth = auth)
+        LoginScreen(
+            auth = auth,
+            texts = texts,
+            onLanguageChange = toggleLanguage
+        )
     } else {
         TodoScreen(
             userId = userId ?: "",
+            texts = texts,
+            onLanguageChange = toggleLanguage,
             onLogout = { auth.signOut() }
         )
     }
 }
 
 @Composable
-fun LoginScreen(auth: FirebaseAuth) {
+fun LoginScreen(
+    auth: FirebaseAuth,
+    texts: AppTexts,
+    onLanguageChange: () -> Unit
+) {
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var message by remember { mutableStateOf("") }
@@ -98,8 +194,17 @@ fun LoginScreen(auth: FirebaseAuth) {
             .testTag("login_screen"),
         verticalArrangement = Arrangement.Center
     ) {
+        Button(
+            onClick = onLanguageChange,
+            modifier = Modifier.testTag("language_button")
+        ) {
+            Text(texts.languageButton)
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
         Text(
-            text = "Login",
+            text = texts.loginTitle,
             style = MaterialTheme.typography.headlineMedium,
             modifier = Modifier.testTag("login_title")
         )
@@ -109,7 +214,7 @@ fun LoginScreen(auth: FirebaseAuth) {
         OutlinedTextField(
             value = email,
             onValueChange = { email = it },
-            label = { Text("E-Mail") },
+            label = { Text(texts.email) },
             modifier = Modifier
                 .fillMaxWidth()
                 .testTag("email_input")
@@ -120,7 +225,7 @@ fun LoginScreen(auth: FirebaseAuth) {
         OutlinedTextField(
             value = password,
             onValueChange = { password = it },
-            label = { Text("Passwort") },
+            label = { Text(texts.password) },
             visualTransformation = PasswordVisualTransformation(),
             modifier = Modifier
                 .fillMaxWidth()
@@ -135,9 +240,9 @@ fun LoginScreen(auth: FirebaseAuth) {
                 auth.signInWithEmailAndPassword(email.trim(), password)
                     .addOnCompleteListener { task ->
                         message = if (task.isSuccessful) {
-                            "Login erfolgreich"
+                            texts.loginSuccess
                         } else {
-                            task.exception?.message ?: "Login fehlgeschlagen"
+                            task.exception?.message ?: texts.loginFailed
                         }
                     }
             },
@@ -145,7 +250,7 @@ fun LoginScreen(auth: FirebaseAuth) {
                 .fillMaxWidth()
                 .testTag("login_button")
         ) {
-            Text("Einloggen")
+            Text(texts.login)
         }
 
         Spacer(modifier = Modifier.height(8.dp))
@@ -156,9 +261,9 @@ fun LoginScreen(auth: FirebaseAuth) {
                 auth.createUserWithEmailAndPassword(email.trim(), password)
                     .addOnCompleteListener { task ->
                         message = if (task.isSuccessful) {
-                            "Registrierung erfolgreich"
+                            texts.registerSuccess
                         } else {
-                            task.exception?.message ?: "Registrierung fehlgeschlagen"
+                            task.exception?.message ?: texts.registerFailed
                         }
                     }
             },
@@ -166,7 +271,7 @@ fun LoginScreen(auth: FirebaseAuth) {
                 .fillMaxWidth()
                 .testTag("register_button")
         ) {
-            Text("Registrieren")
+            Text(texts.register)
         }
 
         if (message.isNotBlank()) {
@@ -182,6 +287,8 @@ fun LoginScreen(auth: FirebaseAuth) {
 @Composable
 fun TodoScreen(
     userId: String,
+    texts: AppTexts,
+    onLanguageChange: () -> Unit,
     onLogout: () -> Unit
 ) {
     val db = remember { FirebaseFirestore.getInstance() }
@@ -200,7 +307,7 @@ fun TodoScreen(
             .orderBy("createdAt", Query.Direction.DESCENDING)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
-                    errorMessage = "Fehler beim Laden der Aufgaben"
+                    errorMessage = texts.loadError
                     return@addSnapshotListener
                 }
 
@@ -228,12 +335,21 @@ fun TodoScreen(
             .padding(16.dp)
             .testTag("todo_screen")
     ) {
+        Button(
+            onClick = onLanguageChange,
+            modifier = Modifier.testTag("language_button")
+        ) {
+            Text(texts.languageButton)
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Text(
-                text = "Android ToDo Testing",
+                text = texts.todoTitle,
                 style = MaterialTheme.typography.headlineSmall,
                 modifier = Modifier.testTag("todo_title")
             )
@@ -242,7 +358,7 @@ fun TodoScreen(
                 onClick = onLogout,
                 modifier = Modifier.testTag("logout_button")
             ) {
-                Text("Logout")
+                Text(texts.logout)
             }
         }
 
@@ -254,7 +370,7 @@ fun TodoScreen(
                 input = it
                 errorMessage = null
             },
-            label = { Text("Neue Aufgabe") },
+            label = { Text(texts.taskInput) },
             isError = errorMessage != null,
             modifier = Modifier
                 .fillMaxWidth()
@@ -286,24 +402,24 @@ fun TodoScreen(
                             errorMessage = null
                         }
                         .addOnFailureListener {
-                            errorMessage = "Aufgabe konnte nicht gespeichert werden"
+                            errorMessage = texts.saveError
                         }
                 } else {
-                    errorMessage = "Bitte Aufgabe eingeben"
+                    errorMessage = texts.errorEmptyTask
                 }
             },
             modifier = Modifier
                 .fillMaxWidth()
                 .testTag("add_button")
         ) {
-            Text("Aufgabe hinzufügen")
+            Text(texts.addTask)
         }
 
         Spacer(modifier = Modifier.height(16.dp))
 
         if (todos.isEmpty()) {
             Text(
-                text = "Keine Aufgaben vorhanden",
+                text = texts.emptyList,
                 modifier = Modifier.testTag("empty_state")
             )
         }
@@ -352,7 +468,7 @@ fun TodoScreen(
                             },
                             modifier = Modifier.testTag("delete_button_${todo.id}")
                         ) {
-                            Text("Löschen")
+                            Text(texts.delete)
                         }
                     }
                 }
